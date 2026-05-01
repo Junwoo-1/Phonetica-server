@@ -1,0 +1,65 @@
+[project]
+name = "voice-pron"
+version = "0.1.0"
+description = "한국어 자모 단위 발음 정확도 측정 API"
+authors = [
+    { name = "G4tsby", email = "juwonkwon.dev@gmail.com" }
+]
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "fastapi>=0.115,<0.116",
+    "uvicorn[standard]>=0.32",
+    "sse-starlette>=2.1",
+    "python-multipart>=0.0.12",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "soundfile>=0.12.1",
+    "librosa>=0.10.2",
+    "numpy>=1.26,<2.2",
+    "faster-whisper>=1.1.0",
+    "transformers>=4.46,<5.0",
+    "torch>=2.5",
+    "torchaudio>=2.5",
+    "accelerate>=1.1",
+    "g2pkk>=0.1.2",
+    "python-mecab-ko>=1.3",
+    "jamo>=0.4.1",
+    "orjson>=3.10",
+    "onnxruntime<1.20",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.7",
+    "gtts>=2.5.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/voice_pron"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchaudio = { index = "pytorch-cu130" }
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
