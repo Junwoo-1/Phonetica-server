@@ -219,6 +219,7 @@ async def run_pipeline(
         asr_result.language_prob < settings.low_language_prob
         or phoneme_result.ctc_confidence < 0.3
     )
+    score_payload["ref_jamo"] = [_serialize_jamo(t) for t in ref_jamo]
     yield event("score", score_payload, request_id)
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
