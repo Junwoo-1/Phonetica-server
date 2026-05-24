@@ -2,7 +2,7 @@
 
 한국어 음성 입력을 받아 **자모(초성/중성/종성) 단위 발음 정확도**를 측정하는 Python API.
 
-별도의 정답 텍스트(reference) 없이 동작한다. ASR이 인식한 텍스트의 표준 발음 자모 시퀀스(G2P 결과)와, 같은 음성에서 phoneme 모델이 추출한 실제 발음 자모 시퀀스를 가중 Needleman-Wunsch로 정렬해 자모별/위치별 정확도와 종합 점수를 산출한다.
+별도의 정답 텍스트(reference) 없이 동작한다. ASR이 인식한 텍스트의 표준 발음 자모 시퀀스(G2P 결과)와, 같은 음성에서 phoneme 모델이 추출한 실제 발음 자모 시퀀스를 가중 Needleman-Wunsch로 정렬해 클라이언트(UI)에서 음절 단위로 조립할 수 있도록 음절(Syllable) 및 자모별/위치별 개별 점수와 종합 점수를 산출한다.
 
 ## 아키텍처
 
@@ -16,7 +16,7 @@ audio file
                                                   └─► Needleman-Wunsch ◄──────┘
                                                             │
                                                             ▼
-                                                    자모별/위치별 점수
+                                                음절 단위 자모 맵핑 및 개별 점수 산출
                                                             │
                                                             ▼
                                                     SSE 이벤트 스트림
@@ -70,20 +70,23 @@ accepted → audio_loaded → asr_progress* → asr_completed
 `score` 페이로드 예:
 ```json
 {
-  "overall_score": 88.16,
-  "per": 0.16,
-  "weighted_per": 0.118,
-  "counts": {"match": 21, "sub": 3, "ins": 0, "del": 1},
-  "per_position": {
-    "onset":   {"matched": 8,  "total": 10, "accuracy": 0.8},
-    "nucleus": {"matched": 10, "total": 10, "accuracy": 1.0},
-    "coda":    {"matched": 3,  "total": 5,  "accuracy": 0.6}
-  },
-  "per_jamo": {"ㅎ@onset": {"ref_count": 1, "correct": 0, "errors": {"del": 1}}},
-  "problem_jamos": ["ㅎ@onset"],
-  "low_confidence": false
+  "recognized_word": "닭볶이",
+  "whisper_text": "닥뽀끼",
+  "overall_score": 95.77,
+  "detailed_jamos": [
+    { "syl": 0, "pos": "onset", "char": "ㄷ", "score": 90.0 },
+    { "syl": 0, "pos": "nucleus", "char": "ㅏ", "score": 100.0 },
+    { "syl": 0, "pos": "coda", "char": "ㄱ", "score": 85.0 },
+    { "syl": 1, "pos": "onset", "char": "ㅃ", "score": 95.0 },
+    { "syl": 1, "pos": "nucleus", "char": "ㅗ", "score": 100.0 },
+    { "syl": 2, "pos": "onset", "char": "ㄲ", "score": 80.0 },
+    { "syl": 2, "pos": "nucleus", "char": "ㅣ", "score": 100.0 }
+  ]
 }
 ```
+- syl: 음절 인덱스 (클라이언트에서 한 글자 단위 블록을 생성하는 기준)
+- pos: 자모 위치 (onset 초성, nucleus 중성, coda 종성)
+- char: 매핑된 실제 자모 텍스트
 
 ## CLI로 단일 파일 검증
 
@@ -109,6 +112,7 @@ uv run pytest tests/integration -v   # mock 기반 통합 테스트
   - coda del: 0.5, onset del: 1.0, nucleus del: 1.2, ins: 1.0
 - **종합 점수**: `100 * max(0, 1 - total_cost / Σref_weight)`
 - **PER**: `(sub + ins + del) / N_ref`
+- 음절 기반 매핑: 정렬된 자모 데이터를 유니티 등 클라이언트 UI에서 조립할 수 있도록 원래의 음절 인덱스(syl) 및 위치(pos) 기준으로 재그룹화하여 detailed_jamos 리스트로 반환한다.
 
 ## 한계와 엣지 케이스
 
@@ -154,6 +158,6 @@ src/voice_pron/
 ├── align/
 │   ├── needleman.py     # 가중 NW
 │   └── cost.py          # 자모 거리 행렬
-├── scoring/score.py     # 점수 산정
+├── scoring/score.py     # 점수 산정 및 detailed_jamos 맵핑
 └── pipeline/orchestrator.py  # SSE 이벤트 yield
 ```
