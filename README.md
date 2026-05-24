@@ -7,7 +7,7 @@
 ## 아키텍처
 
 ```
-audio file
+audio file + candidates(후보 단어)
    │
    ├─► faster-whisper (large-v3, ko)        ─► 인식 텍스트 ─► g2pkk + jamo ─► ref_jamo[]
    │                                                                          │
@@ -20,7 +20,6 @@ audio file
                                                             │
                                                             ▼
                                                     SSE 이벤트 스트림
-```
 
 ## 요구 환경
 
@@ -51,7 +50,9 @@ uv run uvicorn voice_pron.main:app --host 0.0.0.0 --port 8000
 ```
 
 엔드포인트:
-- `POST /pronounce` — 멀티파트 `file` 필드로 wav/mp3 업로드, SSE 스트림 응답
+- POST /pronounce — 멀티파트 폼 데이터(Multipart Form Data) 전송, SSE 스트림 응답
+- - file (File): wav/mp3 오디오 파일
+- - candidates (String): 현재 게임 내 인식 대상 후보 단어 리스트 (예: "닭볶이,포도,오렌지")
 - `GET /health` — 헬스 체크
 
 ## SSE 이벤트 순서
@@ -147,10 +148,10 @@ src/voice_pron/
 ├── main.py              # FastAPI + lifespan
 ├── config.py            # pydantic-settings
 ├── api/
-│   ├── routes.py        # /pronounce SSE
+│   ├── routes.py        # /pronounce SSE (file 및 candidates 수신)
 │   └── sse.py           # 이벤트 envelope
 ├── audio/loader.py      # 16kHz mono 변환, silence_ratio
-├── asr/whisper_asr.py   # faster-whisper async wrapper
+├── asr/whisper_asr.py   # faster-whisper async wrapper (candidates 힌트 활용)
 ├── g2p/
 │   ├── pronouncer.py    # g2pkk + 정규화
 │   └── jamo_utils.py    # 자모 분해/위치 태깅
