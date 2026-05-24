@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from sse_starlette.sse import EventSourceResponse
 
 from voice_pron.api.sse import event
@@ -23,6 +23,7 @@ _gpu_semaphore = asyncio.Semaphore(settings.concurrency)
 async def pronounce(
     request: Request,
     file: UploadFile = File(...),
+    candidates: str = Form(...),  # ⭐️ [NEW] 유니티가 보낸 후보군 목록 받기
 ):
     if file.size is not None and file.size > settings.max_file_bytes:
         raise HTTPException(status_code=413, detail="file too large")
@@ -33,6 +34,7 @@ async def pronounce(
 
     request_id = str(uuid.uuid4())
     models: ModelBundle = request.app.state.models
+    word_cache: dict = request.app.state.word_cache  # ⭐️ [NEW] 캐싱된 단어장
 
     try:
         audio = load_audio_bytes(data)
@@ -56,7 +58,8 @@ async def pronounce(
         )
         async with _gpu_semaphore:
             try:
-                async for ev in run_pipeline(audio, models, request_id):
+                # ⭐️ [NEW] run_pipeline에 캐시와 후보 단어 문자열을 넘겨줍니다.
+                async for ev in run_pipeline(audio, models, word_cache, candidates, request_id):
                     if await request.is_disconnected():
                         break
                     yield ev

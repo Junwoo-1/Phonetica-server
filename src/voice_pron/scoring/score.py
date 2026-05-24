@@ -42,6 +42,7 @@ class ScoreReport:
     per_position: dict[Position, PositionStat]
     per_jamo: dict[str, JamoStat]
     problem_jamos: list[str]
+    detailed_jamos: list[dict] # ⭐️ [NEW] 유니티로 내려갈 개별 자모 점수 배열
 
 
 def compute_scores(alignment: AlignmentResult, ref: list[JamoToken]) -> ScoreReport:
@@ -52,6 +53,7 @@ def compute_scores(alignment: AlignmentResult, ref: list[JamoToken]) -> ScoreRep
         "coda": PositionStat(),
     }
     per_jamo: dict[str, JamoStat] = defaultdict(JamoStat)
+    detailed_jamos = [] # ⭐️ [NEW] 디테일 점수를 담을 리스트
 
     n_ref = len(ref)
     total_weight = sum(reference_weight(t) for t in ref) or 1.0
@@ -60,18 +62,35 @@ def compute_scores(alignment: AlignmentResult, ref: list[JamoToken]) -> ScoreRep
         op = pair.op
         counts[op] += 1
         r = pair.ref
+        
         if r is not None:
             per_position[r.pos].total += 1
             stat = per_jamo[f"{r.char}@{r.pos}"]
             stat.ref_count += 1
+            
+            # ⭐️ [NEW] 개별 자모 단위 점수 산출 (UI 피드백용)
             if op == "match":
                 per_position[r.pos].matched += 1
                 stat.correct += 1
+                j_score = 100
             elif op == "sub":
                 hyp_char = pair.hyp.char if pair.hyp else "?"
                 stat.add_error(f"sub_to_{hyp_char}")
+                # 오차 비용만큼 감점 (최소 0점)
+                ref_wt = reference_weight(r) or 1.0
+                j_score = int(100 * max(0.0, 1.0 - (pair.cost / ref_wt)))
             elif op == "del":
                 stat.add_error("del")
+                j_score = 0
+            else:
+                j_score = 100
+                
+            detailed_jamos.append({
+                "char": r.char,
+                "pos": r.pos,
+                "score": j_score,
+                "syl": r.syl  # ⭐️ [NEW] 몇 번째 글자인지 인덱스 추가 (0번=사, 1번=과)
+            })
 
     per = (
         (counts["sub"] + counts["del"] + counts["ins"]) / n_ref
@@ -100,4 +119,5 @@ def compute_scores(alignment: AlignmentResult, ref: list[JamoToken]) -> ScoreRep
         per_position=per_position,
         per_jamo=dict(per_jamo),
         problem_jamos=problem_jamos,
+        detailed_jamos=detailed_jamos, # ⭐️ [NEW]
     )

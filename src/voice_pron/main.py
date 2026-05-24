@@ -1,9 +1,11 @@
-"""FastAPI 엔트리포인트 + lifespan (모델 1회 로드)."""
+"""FastAPI 엔트리포인트 + lifespan (모델 1회 로드 및 단어 캐싱)."""
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import torch
 from fastapi import FastAPI
@@ -36,9 +38,25 @@ async def lifespan(app: FastAPI):
     )
 
     g2p = StandardPronouncer()
-
     app.state.models = ModelBundle(asr=asr, g2p=g2p, phoneme=phoneme)
-    logger.info("models loaded")
+
+    # ⭐️ [NEW] WordBank.json을 읽어 서버 메모리에 캐싱(사전 연산)합니다.
+    word_cache = {}
+    wordbank_path = Path("WordBank.json")
+    if wordbank_path.exists():
+        with open(wordbank_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            for item in data.get("wordList", []):
+                word = item["word"]
+                pron = item.get("pronunciation", word)
+                jamo_seq = g2p.to_jamo_sequence(pron)
+                word_cache[word] = jamo_seq
+        logger.info("WordBank.json에서 %d개의 단어를 성공적으로 캐싱했습니다.", len(word_cache))
+    else:
+        logger.warning("WordBank.json 파일을 찾을 수 없습니다. (%s) 캐시가 비어있습니다.", wordbank_path)
+        
+    app.state.word_cache = word_cache
+    logger.info("models and cache loaded")
 
     try:
         yield
@@ -50,8 +68,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="voice-pron",
-    description="한국어 자모 단위 발음 정확도 측정 API",
-    version="0.1.0",
+    description="한국어 자모 단위 발음 정확도 측정 API (하이브리드 매칭)",
+    version="0.2.0",
     lifespan=lifespan,
 )
 app.include_router(router)
