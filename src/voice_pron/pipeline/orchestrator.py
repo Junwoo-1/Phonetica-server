@@ -1,20 +1,18 @@
-"""오디오 처리 파이프라인: ASR → G2P → Phoneme → Alignment → Score.
+"""오디오 처리 파이프라인: Phoneme → 후보 단어 정렬 → Score.
 
 각 단계 결과를 SSE 이벤트 dict로 yield한다.
 """
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
-from voice_pron.align.cost import jamo_distance
+from voice_pron.align.cost import jamo_distance, reference_weight
 from voice_pron.align.needleman import align as nw_align
 from voice_pron.api.sse import event
-from voice_pron.asr.whisper_asr import ASRResult, ASRSegment, WhisperASR
 from voice_pron.audio.loader import AudioBuffer
 from voice_pron.config import settings
 from voice_pron.g2p.jamo_utils import JamoToken
@@ -25,7 +23,6 @@ from voice_pron.scoring.score import ScoreReport, compute_scores
 
 @dataclass
 class ModelBundle:
-    asr: WhisperASR
     g2p: StandardPronouncer
     phoneme: JamoPhonemeRecognizer
 
@@ -57,15 +54,20 @@ def _serialize_score(report: ScoreReport) -> dict[str, Any]:
             for key, stat in report.per_jamo.items()
         },
         "problem_jamos": report.problem_jamos,
+        "detailed_jamos": report.detailed_jamos,
     }
 
 
 async def run_pipeline(
     audio: AudioBuffer,
     models: ModelBundle,
+    word_cache: dict[str, list[JamoToken]],
+    candidates_str: str,
     request_id: str,
-) -> AsyncIterator[dict[str, str]]:
+) -> AsyncIterator[dict[str, Any]]:
     started = time.perf_counter()
+
+    candidate_words = [c.strip() for c in candidates_str.split(",") if c.strip()]
 
     yield event(
         "audio_loaded",
@@ -85,88 +87,8 @@ async def run_pipeline(
         )
         return
 
-    # phoneme 인식은 백그라운드로 시작 (ASR과 동시 진행)
-    phon_task = asyncio.create_task(models.phoneme.recognize(audio))
-
-    # ASR 세그먼트를 스트리밍하며 progress 이벤트 방출, 완료 후 결과 조립
-    asr_segments: list[ASRSegment] = []
     try:
-        async for seg in models.asr.transcribe_stream(audio):
-            asr_segments.append(seg)
-            yield event(
-                "asr_progress",
-                {
-                    "segment_index": seg.index,
-                    "start": round(seg.start, 3),
-                    "end": round(seg.end, 3),
-                    "text": seg.text,
-                    "avg_logprob": round(seg.avg_logprob, 4),
-                },
-                request_id,
-            )
-    except Exception as e:
-        phon_task.cancel()
-        yield event(
-            "error",
-            {"code": "ASR_FAILED", "message": f"음성 인식 실패: {e}"},
-            request_id,
-        )
-        return
-
-    info = getattr(models.asr, "_last_info", None)
-    asr_result = ASRResult(
-        text=" ".join(s.text for s in asr_segments).strip(),
-        segments=asr_segments,
-        language=info.language if info else "ko",
-        language_prob=float(info.language_probability) if info else 0.0,
-    )
-
-    yield event(
-        "asr_completed",
-        {
-            "text": asr_result.text,
-            "language": asr_result.language,
-            "language_prob": round(asr_result.language_prob, 4),
-        },
-        request_id,
-    )
-
-    if not asr_result.text:
-        phon_task.cancel()
-        yield event(
-            "error",
-            {"code": "NO_SPEECH", "message": "인식된 텍스트가 없습니다."},
-            request_id,
-        )
-        return
-
-    # G2P
-    pronunciation = models.g2p.to_pronunciation(asr_result.text)
-    ref_jamo = models.g2p.to_jamo_sequence(asr_result.text)
-    yield event(
-        "g2p_completed",
-        {
-            "pronunciation": pronunciation,
-            "ref_jamo": [_serialize_jamo(t) for t in ref_jamo],
-        },
-        request_id,
-    )
-
-    if not ref_jamo:
-        phon_task.cancel()
-        yield event(
-            "error",
-            {
-                "code": "NO_HANGUL",
-                "message": "인식된 텍스트에 한글이 없어 평가할 수 없습니다.",
-            },
-            request_id,
-        )
-        return
-
-    # phoneme 결과 대기
-    try:
-        phoneme_result = await phon_task
+        phoneme_result = await models.phoneme.recognize(audio)
     except Exception as e:
         yield event(
             "error",
@@ -194,8 +116,43 @@ async def run_pipeline(
         request_id,
     )
 
-    # 정렬 + 점수
-    alignment = nw_align(ref_jamo, phoneme_result.jamo_tokens, jamo_distance)
+    # 후보 단어들과 NW 정렬해 weighted error rate 최저 후보를 정답으로 선택
+    best_word: str | None = None
+    best_ref_jamo: list[JamoToken] | None = None
+    best_alignment = None
+    min_error_rate = float("inf")
+
+    for word in candidate_words:
+        cand_jamo = word_cache.get(word) or models.g2p.to_jamo_sequence(word)
+        if not cand_jamo:
+            continue
+        alignment = nw_align(cand_jamo, phoneme_result.jamo_tokens, jamo_distance)
+        total_weight = sum(reference_weight(t) for t in cand_jamo) or 1.0
+        error_rate = alignment.total_cost / total_weight
+        if error_rate < min_error_rate:
+            min_error_rate = error_rate
+            best_word = word
+            best_ref_jamo = cand_jamo
+            best_alignment = alignment
+
+    if best_word is None or best_ref_jamo is None or best_alignment is None:
+        yield event(
+            "error",
+            {"code": "NO_VALID_CANDIDATES", "message": "후보 단어를 분해할 수 없습니다."},
+            request_id,
+        )
+        return
+
+    pronunciation = models.g2p.to_pronunciation(best_word)
+    yield event(
+        "g2p_completed",
+        {
+            "pronunciation": pronunciation,
+            "ref_jamo": [_serialize_jamo(t) for t in best_ref_jamo],
+        },
+        request_id,
+    )
+
     yield event(
         "alignment_completed",
         {
@@ -206,20 +163,22 @@ async def run_pipeline(
                     "op": p.op,
                     "cost": round(p.cost, 4),
                 }
-                for p in alignment.pairs
+                for p in best_alignment.pairs
             ],
-            "total_cost": round(alignment.total_cost, 4),
+            "total_cost": round(best_alignment.total_cost, 4),
         },
         request_id,
     )
 
-    score = compute_scores(alignment, ref_jamo)
+    score = compute_scores(best_alignment, best_ref_jamo)
     score_payload = _serialize_score(score)
-    score_payload["low_confidence"] = (
-        asr_result.language_prob < settings.low_language_prob
-        or phoneme_result.ctc_confidence < 0.3
-    )
-    score_payload["ref_jamo"] = [_serialize_jamo(t) for t in ref_jamo]
+    score_payload["recognized_word"] = best_word
+    score_payload["heard_jamos"] = [
+        {"syl": t.syl, "pos": t.pos, "char": t.char}
+        for t in phoneme_result.jamo_tokens
+    ]
+    score_payload["low_confidence"] = phoneme_result.ctc_confidence < 0.3
+    score_payload["ref_jamo"] = [_serialize_jamo(t) for t in best_ref_jamo]
     yield event("score", score_payload, request_id)
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)

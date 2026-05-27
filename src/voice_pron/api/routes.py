@@ -1,16 +1,17 @@
-"""POST /pronounce: 오디오 파일 업로드 → SSE 스트림."""
+"""POST /pronounce: 오디오 파일 + 후보 단어 → SSE 스트림."""
 
 from __future__ import annotations
 
 import asyncio
 import uuid
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from sse_starlette.sse import EventSourceResponse
 
 from voice_pron.api.sse import event
 from voice_pron.audio.loader import AudioLoadError, load_audio_bytes
 from voice_pron.config import settings
+from voice_pron.g2p.jamo_utils import JamoToken
 from voice_pron.pipeline.orchestrator import ModelBundle, run_pipeline
 
 router = APIRouter()
@@ -23,9 +24,19 @@ _gpu_semaphore = asyncio.Semaphore(settings.concurrency)
 async def pronounce(
     request: Request,
     file: UploadFile = File(...),
+    candidates: str = Form(...),
 ):
     if file.size is not None and file.size > settings.max_file_bytes:
         raise HTTPException(status_code=413, detail="file too large")
+
+    candidate_list = [c.strip() for c in candidates.split(",") if c.strip()]
+    if not candidate_list:
+        raise HTTPException(status_code=400, detail="candidates is empty")
+    if len(candidate_list) > settings.max_candidates:
+        raise HTTPException(
+            status_code=400,
+            detail=f"too many candidates (max {settings.max_candidates})",
+        )
 
     data = await file.read()
     if len(data) > settings.max_file_bytes:
@@ -33,6 +44,7 @@ async def pronounce(
 
     request_id = str(uuid.uuid4())
     models: ModelBundle = request.app.state.models
+    word_cache: dict[str, list[JamoToken]] = request.app.state.word_cache
 
     try:
         audio = load_audio_bytes(data)
@@ -51,12 +63,13 @@ async def pronounce(
             {
                 "filename": file.filename,
                 "size_bytes": len(data),
+                "candidates": candidate_list,
             },
             request_id,
         )
         async with _gpu_semaphore:
             try:
-                async for ev in run_pipeline(audio, models, request_id):
+                async for ev in run_pipeline(audio, models, word_cache, candidates, request_id):
                     if await request.is_disconnected():
                         break
                     yield ev

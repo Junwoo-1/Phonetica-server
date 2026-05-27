@@ -42,6 +42,7 @@ class ScoreReport:
     per_position: dict[Position, PositionStat]
     per_jamo: dict[str, JamoStat]
     problem_jamos: list[str]
+    detailed_jamos: list[dict]
 
 
 def compute_scores(alignment: AlignmentResult, ref: list[JamoToken]) -> ScoreReport:
@@ -52,6 +53,7 @@ def compute_scores(alignment: AlignmentResult, ref: list[JamoToken]) -> ScoreRep
         "coda": PositionStat(),
     }
     per_jamo: dict[str, JamoStat] = defaultdict(JamoStat)
+    detailed_jamos: list[dict] = []
 
     n_ref = len(ref)
     total_weight = sum(reference_weight(t) for t in ref) or 1.0
@@ -67,11 +69,24 @@ def compute_scores(alignment: AlignmentResult, ref: list[JamoToken]) -> ScoreRep
             if op == "match":
                 per_position[r.pos].matched += 1
                 stat.correct += 1
+                j_score = 100.0
             elif op == "sub":
                 hyp_char = pair.hyp.char if pair.hyp else "?"
                 stat.add_error(f"sub_to_{hyp_char}")
+                ref_wt = reference_weight(r) or 1.0
+                j_score = 100.0 * max(0.0, 1.0 - (pair.cost / ref_wt))
             elif op == "del":
                 stat.add_error("del")
+                j_score = 0.0
+            else:
+                j_score = 100.0
+
+            detailed_jamos.append({
+                "syl": r.syl,
+                "pos": r.pos,
+                "char": r.char,
+                "score": round(j_score, 2),
+            })
 
     per = (
         (counts["sub"] + counts["del"] + counts["ins"]) / n_ref
@@ -100,4 +115,5 @@ def compute_scores(alignment: AlignmentResult, ref: list[JamoToken]) -> ScoreRep
         per_position=per_position,
         per_jamo=dict(per_jamo),
         problem_jamos=problem_jamos,
+        detailed_jamos=detailed_jamos,
     )

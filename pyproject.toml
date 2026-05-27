@@ -1,7 +1,7 @@
 [project]
 name = "voice-pron"
-version = "0.1.0"
-description = "한국어 자모 단위 발음 정확도 측정 API"
+version = "0.2.0"
+description = "한국어 자모 단위 발음 정확도 측정 API (closed-vocab 매칭)"
 authors = [
     { name = "G4tsby", email = "juwonkwon.dev@gmail.com" }
 ]
@@ -16,7 +16,6 @@ dependencies = [
     "soundfile>=0.12.1",
     "librosa>=0.10.2",
     "numpy>=1.26,<2.2",
-    "faster-whisper>=1.1.0",
     "transformers>=4.46,<5.0",
     "torch>=2.5",
     "torchaudio>=2.5",
@@ -45,12 +44,12 @@ build-backend = "hatchling.build"
 packages = ["src/voice_pron"]
 
 [tool.uv.sources]
-torch = { index = "pytorch-cu130" }
-torchaudio = { index = "pytorch-cu130" }
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
 
 [[tool.uv.index]]
-name = "pytorch-cu130"
-url = "https://download.pytorch.org/whl/cu130"
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [tool.pytest.ini_options]
