@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.10, <3.13"
 resolution-markers = [
     "python_full_version >= '3.11'",
@@ -287,12 +287,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/43/fa/6d96a0978d19e17b6
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4e/8c/f3147f5c4b73e7550fe5f9352eaa956ae838d5c51eb58e7a25b9f3e2643b/decorator-5.2.1-py3-none-any.whl", hash = "sha256:d316bb415a2d9e2d2b3abcc4084c6502fc09240e292cd76a76afc106a1c8e04a", size = 9190, upload-time = "2025-02-24T04:41:32.565Z" },
 ]
-
-[[package]]
-name = "eunjeon"
-version = "0.4.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/68/90/3232725f974abf6d38f1e2cfd7a6b958337133b3fdc5b3e8994e03d7c2d3/eunjeon-0.4.0.tar.gz", hash = "sha256:60865fbe28537e820ab864cd135467ea277c8182908e2bc364e83e5fd29ef07f", size = 34741800, upload-time = "2019-01-17T00:42:32.268Z" }
 
 [[package]]
 name = "exceptiongroup"
@@ -1936,7 +1930,6 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
-    { name = "eunjeon" },
     { name = "fastapi" },
     { name = "g2pkk" },
     { name = "jamo" },
@@ -1968,7 +1961,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.1" },
-    { name = "eunjeon", specifier = ">=0.4.0" },
     { name = "fastapi", specifier = ">=0.115,<0.116" },
     { name = "g2pkk", specifier = ">=0.1.2" },
     { name = "jamo", specifier = ">=0.4.1" },

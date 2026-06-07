@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI):
     if WORDBANK_PATH.exists():
         with open(WORDBANK_PATH, encoding="utf-8") as f:
             data = json.load(f)
-        for item in data.get("wordList", []):
+        for item in data.get("words", []):
             word = item["word"]
             pron = item.get("pronunciation")
             if pron:
